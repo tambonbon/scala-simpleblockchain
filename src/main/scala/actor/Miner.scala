@@ -1,10 +1,13 @@
 package actor
 
-import actor.Miner.Validate
+import actor.Miner.{Mine, Ready, Validate}
 import akka.actor.FSM.Failure
 import akka.actor.Status.Success
 import akka.actor.{Actor, ActorLogging, Props}
+import exception.{InvalidProofException, MinerBusyException}
 import pow.ProofOfWork
+
+import scala.concurrent.Future
 
 object Miner {
     
@@ -27,8 +30,11 @@ object Miner {
 }
 
 class Miner extends Actor with ActorLogging {
+    import context._
     
-    override def receive: Receive = ???
+    override def receive: Receive = {
+        case Ready => become(ready) // state transition
+    }
     
     def validate: Receive = {
         case Validate(hash, proof) => {
@@ -43,4 +49,39 @@ class Miner extends Actor with ActorLogging {
             }
         }
     }
+    
+    def ready: Receive = validate orElse {
+        case Mine(hash) => {
+            log.info(s"Mining hash $hash")
+            val proof = Future {
+                ProofOfWork.proofOfWork(hash)
+            }
+            sender() ! proof
+            become(busy) // state transition
+        }
+        case Ready => {
+            log.info("I'm ready to mine!")
+            sender() ! Success("OK")
+        }
+    }
+    
+    def busy: Receive = validate orElse {
+        case Mine(_) => {
+            log.info("I'm busy mining")
+            sender() ! Failure(new MinerBusyException("Miner is busy") )
+        }
+        case Ready => {
+            log.info("I'm ready to mine new block")
+            become(ready)
+        }
+    }
 }
+
+/**
+ * 1. State transition is triggered using `become` function..
+ * .. taking a function as argument
+ * .. returning a Receive object
+ * 2. When a mining request is received by Miner..
+ * .. it responds with a Future containing the execution of PoW algo
+ * ----> we can work asynchronously
+ * 3. The **supervisor** of this Actor controls state transition */
