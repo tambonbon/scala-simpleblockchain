@@ -4,4 +4,4 @@
 *.log
 /target
 target
-
+/.idea
